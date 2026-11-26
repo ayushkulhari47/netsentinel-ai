@@ -24,6 +24,9 @@ netsentinel-ai/
 │   │   ├── __init__.py      # ML package marker
 │   │   ├── feature_schema.py# Standard 11-feature flow schema & validation
 │   │   └── predict.py       # Reusable IsolationForest prediction helpers
+│   ├── services/
+│   │   ├── __init__.py      # Service layer package marker
+│   │   └── flow_aggregator.py# Deterministic 5-tuple bidirectional flow aggregator
 │   ├── static/
 │   │   ├── css/style.css    # Dashboard stylesheet
 │   │   └── js/dashboard.js  # Live API polling & Chart.js severity chart
@@ -34,6 +37,7 @@ netsentinel-ai/
 │   └── train_model.py       # Train IsolationForest on benign flows & evaluate
 ├── tests/
 │   ├── test_alerts.py       # Alert model and API endpoint tests
+│   ├── test_flow_aggregator.py# FlowAggregator unit tests
 │   ├── test_health.py       # Health and homepage route tests
 │   └── test_ml.py           # Feature schema, training, evaluation & prediction tests
 ├── .env.example             # Sample environment configuration
@@ -107,6 +111,16 @@ NetSentinel AI uses an unsupervised `IsolationForest` model trained **only on be
    # {"anomaly_score": ..., "prediction": "normal", "confidence": ...}
    ```
 
+## Network-Flow Aggregation
+
+`app/services/flow_aggregator.py` provides `FlowAggregator`, which converts normalized packet metadata into bidirectional network flows ready for ML inference and alert creation:
+
+- **Flow Key & Directionality:** Groups packets using a canonical bidirectional 5-tuple (`source_ip`, `destination_ip`, `source_port`, `destination_port`, `protocol`). The first packet seen establishes the initiator direction (`source_ip`/`source_port` -> `destination_ip`/`destination_port`) and increments `forward_packets`; reply packets on the reverse 5-tuple merge into the same flow and increment `backward_packets`.
+- **Tracked Metrics:** Maintains `first_seen`, `last_seen`, `duration`, `flow_bytes`, `flow_packets`, `forward_packets`, `backward_packets`, `average_packet_size`, `packet_rate`, `byte_rate`, and observed `tcp_flags`.
+- **Zero-Duration Handling:** Single-packet or identical-timestamp flows produce `duration = 0.0`, `packet_rate = 0.0`, and `byte_rate = 0.0` (avoiding division by zero).
+- **Inactivity Timeout & Flushing:** Flows idle for at least `inactivity_timeout` seconds are expired via `flush_expired(current_time=...)` (or an injected `time_fn`), and all remaining flows can be drained via `flush_all()`.
+- **Output Compatibility:** Every returned dictionary preserves `source_ip` and `destination_ip` for alert reporting and satisfies `app/ml/feature_schema.py` (`validate_flow_record()` and `predict_flow()`).
+
 ## Running Tests
 
 ```powershell
@@ -118,4 +132,5 @@ NetSentinel AI uses an unsupervised `IsolationForest` model trained **only on be
 - [x] Phase 1: Flask app factory, homepage (`/`), health endpoint (`/health`), and pytest setup
 - [x] Phase 2: SQLite `Alert` model, validated `/api/alerts` and `/api/summary` endpoints, and live dashboard integration
 - [x] Phase 3: ML flow schema, synthetic dataset generator, `IsolationForest` training/evaluation, and reusable prediction module
-- [ ] Phase 4+: Live packet capture (Scapy) integration (upcoming)
+- [x] Phase 4: Bidirectional `FlowAggregator` service with inactivity expiration and ML-compatible flow output
+- [ ] Phase 5+: Live packet capture (Scapy) integration (upcoming)
