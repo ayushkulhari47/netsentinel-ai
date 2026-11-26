@@ -11,7 +11,8 @@ from app.services.threat_intel import DEFAULT_CACHE_TTL_SECONDS, ThreatIntelServ
 
 def create_app(test_config=None):
     """Create and configure the Flask application instance."""
-    load_dotenv()
+    if test_config is None:
+        load_dotenv()
 
     app = Flask(__name__)
     os.makedirs(app.instance_path, exist_ok=True)
@@ -23,6 +24,10 @@ def create_app(test_config=None):
         SECRET_KEY=os.environ.get("SECRET_KEY", "dev-secret-change-in-production"),
         APP_NAME="NetSentinel AI",
         APP_VERSION="0.1.0",
+        DEBUG=os.environ.get("FLASK_DEBUG", "false").lower() == "true",
+        TESTING=False,
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
         SQLALCHEMY_DATABASE_URI=database_url,
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
         ABUSEIPDB_API_KEY=None,
@@ -55,5 +60,30 @@ def create_app(test_config=None):
     from app.routes import main_bp
 
     app.register_blueprint(main_bp)
+
+    @app.after_request
+    def apply_security_headers(response):
+        """Attach defensive HTTP security headers to all application responses."""
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault(
+            "Permissions-Policy",
+            "geolocation=(), microphone=(), camera=()",
+        )
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            (
+                "default-src 'self'; "
+                "script-src 'self' https://cdn.jsdelivr.net; "
+                "style-src 'self'; "
+                "img-src 'self' data:; "
+                "connect-src 'self'; "
+                "frame-ancestors 'none'; "
+                "base-uri 'self'; "
+                "form-action 'self'"
+            ),
+        )
+        return response
 
     return app
