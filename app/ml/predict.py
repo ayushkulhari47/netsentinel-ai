@@ -60,11 +60,40 @@ def _score_to_result(decision_score, raw_pred, score_scale):
     }
 
 
+def _proba_to_result(prob_attack, threshold):
+    """Convert supervised attack probability and decision threshold into standard output."""
+    prob = max(0.0, min(1.0, float(prob_attack)))
+    thresh = max(1e-6, min(1.0 - 1e-6, float(threshold)))
+    is_anomaly = prob >= thresh
+
+    if is_anomaly:
+        confidence = 0.5 + 0.5 * ((prob - thresh) / max(1.0 - thresh, 1e-6))
+    else:
+        confidence = 0.5 + 0.5 * ((thresh - prob) / max(thresh, 1e-6))
+
+    return {
+        "anomaly_score": round(prob, 4),
+        "prediction": "anomaly" if is_anomaly else "normal",
+        "confidence": round(min(1.0, max(0.5, confidence)), 4),
+    }
+
+
+def _is_supervised_classifier(bundle, pipeline):
+    """Return True if the loaded model bundle represents a supervised classifier."""
+    model_type = str(bundle.get("model_type", "")).strip().lower()
+    if model_type == "random_forest":
+        return True
+    if model_type == "isolation_forest":
+        return False
+    return hasattr(pipeline, "predict_proba")
+
+
 def predict_flows(flows, model_path=None, model_bundle=None):
     """Predict anomaly scores, labels, and confidence for a batch of network flows."""
     bundle = model_bundle if model_bundle is not None else load_model_bundle(model_path)
     pipeline = bundle["pipeline"]
     score_scale = bundle.get("score_scale", 0.1)
+    features = bundle.get("features") or FLOW_FEATURES
 
     if isinstance(flows, pd.DataFrame):
         df = validate_flow_dataframe(flows)
@@ -76,8 +105,13 @@ def predict_flows(flows, model_path=None, model_bundle=None):
     else:
         raise ValueError("flows must be a list of dictionaries or a pandas DataFrame.")
 
-    decision_scores = pipeline.decision_function(df[FLOW_FEATURES])
-    raw_preds = pipeline.predict(df[FLOW_FEATURES])
+    if _is_supervised_classifier(bundle, pipeline):
+        threshold = float(bundle.get("decision_threshold", 0.5))
+        probs = pipeline.predict_proba(df[features])[:, 1]
+        return [_proba_to_result(prob, threshold) for prob in probs]
+
+    decision_scores = pipeline.decision_function(df[features])
+    raw_preds = pipeline.predict(df[features])
 
     return [
         _score_to_result(score, pred, score_scale)

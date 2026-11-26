@@ -28,9 +28,9 @@ DEFAULT_MODEL_DIR = PROJECT_ROOT / "models"
 DEFAULT_MODEL_FILENAME = "isolation_forest.joblib"
 
 
-def build_pipeline(contamination=0.02, n_estimators=200, random_state=42):
-    """Build the preprocessing + IsolationForest scikit-learn pipeline."""
-    preprocessor = ColumnTransformer(
+def build_preprocessor():
+    """Build the shared ColumnTransformer for numeric and protocol flow features."""
+    return ColumnTransformer(
         transformers=[
             ("numeric", StandardScaler(), NUMERIC_FEATURES),
             (
@@ -42,6 +42,9 @@ def build_pipeline(contamination=0.02, n_estimators=200, random_state=42):
         remainder="drop",
     )
 
+
+def build_pipeline(contamination=0.02, n_estimators=200, random_state=42):
+    """Build the preprocessing + IsolationForest scikit-learn pipeline."""
     detector = IsolationForest(
         n_estimators=n_estimators,
         contamination=contamination,
@@ -50,7 +53,7 @@ def build_pipeline(contamination=0.02, n_estimators=200, random_state=42):
 
     return Pipeline(
         steps=[
-            ("preprocessor", preprocessor),
+            ("preprocessor", build_preprocessor()),
             ("model", detector),
         ]
     )

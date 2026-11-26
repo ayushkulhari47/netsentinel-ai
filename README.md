@@ -39,6 +39,7 @@ netsentinel-ai/
 │   └── templates/
 │       └── dashboard.html   # Main dashboard HTML template
 ├── scripts/
+│   ├── benchmark_unsw_models.py# Compare IsolationForest vs balanced RandomForest on UNSW-NB15
 │   ├── generate_demo_data.py# Synthetic benign & anomalous flow data generator
 │   ├── run_capture.py       # Controlled packet capture CLI (--demo / --live)
 │   ├── run_monitor.py       # Full monitoring pipeline CLI (--demo / --live)
@@ -46,6 +47,7 @@ netsentinel-ai/
 │   └── train_unsw_model.py  # Train & evaluate IsolationForest on UNSW-NB15
 ├── tests/
 │   ├── test_alerts.py       # Alert model and API endpoint tests
+│   ├── test_benchmark_unsw.py# UNSW-NB15 benchmarking & RandomForest prediction tests
 │   ├── test_detection_engine.py# RuleEngine and DetectionEngine tests
 │   ├── test_flow_aggregator.py# FlowAggregator unit tests
 │   ├── test_health.py       # Health and homepage route tests
@@ -248,8 +250,28 @@ Open `http://127.0.0.1:5000/` after running `.\.venv\Scripts\python.exe run.py`:
 
 ### Observed UNSW-NB15 Evaluation & Limitations
 
-- **Latest Evaluation (`UNSW_NB15_testing-set.csv`):** 56,000 benign training rows, 82,332 test rows (37,000 Normal + 45,332 attacks across `Generic`, `Exploits`, `Fuzzers`, `DoS`, `Reconnaissance`, `Analysis`, `Backdoor`, `Shellcode`, `Worms`): Precision `0.8715`, Recall `0.2811`, F1-Score `0.4251` (`TN=35,121`, `FP=1,879`, `FN=32,588`, `TP=12,744`).
+- **Latest Baseline Evaluation (`UNSW_NB15_testing-set.csv`):** 56,000 benign training rows, 82,332 test rows (37,000 Normal + 45,332 attacks across `Generic`, `Exploits`, `Fuzzers`, `DoS`, `Reconnaissance`, `Analysis`, `Backdoor`, `Shellcode`, `Worms`): Precision `0.8715`, Recall `0.2811`, F1-Score `0.4251` (`TN=35,121`, `FP=1,879`, `FN=32,588`, `TP=12,744`).
 - **Limitations:** The official `UNSW_NB15_training-set.csv` and `UNSW_NB15_testing-set.csv` files omit `sport` and `dsport` columns (so `source_port` defaults to `0` and `destination_port` is inferred from `service` where available). Additionally, an unsupervised `IsolationForest` trained solely on 11 benign flow-volume/rate features achieves high precision on statistical outliers while missing application-layer attacks whose packet/byte rates resemble normal traffic.
+
+### Model Benchmarking & Improvement (`scripts/benchmark_unsw_models.py`)
+
+Run the leak-free benchmark comparing the preserved `IsolationForest` baseline against a supervised `RandomForestClassifier(class_weight="balanced_subsample")`:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/benchmark_unsw_models.py
+```
+
+- **Leak-Free Selection & Threshold Tuning:** Splits `UNSW_NB15_training-set.csv` into an 80% training split (`140,272` rows) and a 20% validation split (`35,069` rows). `RandomForestClassifier` uses `label` only as the target (never `label`, `attack_cat`, or `id` as features), tunes its probability threshold (`0.32`) and selects the winning model strictly on the validation split, and evaluates both models **once** on `UNSW_NB15_testing-set.csv` (`82,332` rows).
+- **Saved Artifact:** Saves the best bundle (`model_type`, `features`, and `decision_threshold`) to `models/unsw_best_model.joblib` without altering `models/isolation_forest.joblib` or `models/isolation_forest_unsw_nb15.joblib`. `app/ml/predict.py` supports both `IsolationForest` and `RandomForest` bundles seamlessly via `ML_MODEL_PATH=models/unsw_best_model.joblib`.
+
+| Metric | IsolationForest (Baseline) | RandomForest (`balanced_subsample`, thresh=`0.32`) |
+| --- | --- | --- |
+| Precision | `0.8715` | `0.7946` |
+| Recall | `0.2811` | `0.9793` |
+| F1-Score | `0.4251` | `0.8773` |
+| ROC-AUC | `0.7613` | `0.9702` |
+| PR-AUC | `0.7769` | `0.9737` |
+| Confusion Matrix | `TN=35,121, FP=1,879, FN=32,588, TP=12,744` | `TN=25,525, FP=11,475, FN=939, TP=44,393` |
 
 ### UNSW-NB15 Citation
 
@@ -274,3 +296,4 @@ Open `http://127.0.0.1:5000/` after running `.\.venv\Scripts\python.exe run.py`:
 - [x] Phase 9: Live security dashboard with 3-second polling, monitoring toggle, filters, alert modal, and on-demand explanation button
 - [x] Phase 10: End-to-end `MonitoringService` pipeline and `scripts/run_monitor.py` (`--demo` / `--live`)
 - [x] Phase 11: Real UNSW-NB15 training/evaluation (`scripts/train_unsw_model.py`) and `ML_MODEL_PATH` selection
+- [x] Phase 12: Leak-free UNSW-NB15 benchmarking (`IsolationForest` vs `RandomForestClassifier`) and `models/unsw_best_model.joblib`
