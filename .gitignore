@@ -25,7 +25,9 @@ instance/
 *.sqlite
 *.sqlite3
 
-# Saved ML Models & Packet Captures
+# Saved ML Models, Generated Datasets & Packet Captures
+models/
+data/
 *.joblib
 *.pkl
 *.pcap
