@@ -141,6 +141,10 @@ class ThreatIntelService:
         raw = self._explicit_api_key if self._explicit_api_key is not None else os.environ.get("ABUSEIPDB_API_KEY")
         return _normalize_api_key(raw)
 
+    def is_configured(self):
+        """Return True if a non-placeholder ABUSEIPDB_API_KEY is configured."""
+        return self._get_api_key() is not None
+
     def clear_cache(self):
         """Clear all cached IP lookup entries."""
         self._cache.clear()

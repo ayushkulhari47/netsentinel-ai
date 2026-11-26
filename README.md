@@ -29,6 +29,7 @@ netsentinel-ai/
 │   │   ├── detection_engine.py# Hybrid ML + rules + threat-intel risk scoring engine
 │   │   ├── flow_aggregator.py# Deterministic 5-tuple bidirectional flow aggregator
 │   │   ├── llm_explainer.py # Optional sanitized OpenAI alert explanation generator
+│   │   ├── monitoring_service.py# End-to-end capture -> flow -> ML -> SQLite pipeline
 │   │   ├── packet_capture.py# Controlled Scapy metadata-only packet capture service
 │   │   ├── rule_engine.py   # Explainable heuristic flow rules
 │   │   └── threat_intel.py  # Optional AbuseIPDB lookup with TTL cache & safety guards
@@ -40,6 +41,7 @@ netsentinel-ai/
 ├── scripts/
 │   ├── generate_demo_data.py# Synthetic benign & anomalous flow data generator
 │   ├── run_capture.py       # Controlled packet capture CLI (--demo / --live)
+│   ├── run_monitor.py       # Full monitoring pipeline CLI (--demo / --live)
 │   └── train_model.py       # Train IsolationForest on benign flows & evaluate
 ├── tests/
 │   ├── test_alerts.py       # Alert model and API endpoint tests
@@ -48,6 +50,7 @@ netsentinel-ai/
 │   ├── test_health.py       # Health and homepage route tests
 │   ├── test_llm_explainer.py# Mocked LLM explainer & /explain endpoint tests
 │   ├── test_ml.py           # Feature schema, training, evaluation & prediction tests
+│   ├── test_monitoring.py   # End-to-end monitoring pipeline & CLI tests
 │   ├── test_packet_capture.py# Mocked Scapy packet capture & CLI safety tests
 │   └── test_threat_intel.py # Mocked AbuseIPDB lookup, caching & API route tests
 ├── .env.example             # Sample environment configuration
@@ -192,6 +195,21 @@ Open `http://127.0.0.1:5000/` after running `.\.venv\Scripts\python.exe run.py`:
 - **Alert Filtering:** Filter alerts dynamically by **Severity**, **Status**, **Source IP**, or **Destination IP** (with **Clear Filters** to reset). Both the alert table and the severity bar chart update from real database data.
 - **Alert Details & On-Demand AI Explanations:** Click any alert row (or **Inspect**) to open the details modal showing `explanation`, `anomaly_score`, `threat_score`, and source-IP threat-intelligence lookup (`GET /api/threat-intel/<ip>`). Click **Generate AI Explanation** to call `POST /api/alerts/<id>/explain` on demand—if `OPENAI_API_KEY` is not set, a structured rule-based fallback explanation is displayed cleanly.
 
+## End-to-End Monitoring Pipeline (`scripts/run_monitor.py`)
+
+`app/services/monitoring_service.py` connects the full pipeline (`packet metadata -> FlowAggregator -> completed flow -> DetectionEngine -> optional ThreatIntelService -> SQLite Alert`). Only completed flows are analyzed, packet payloads are never stored, and Flask startup never starts monitoring automatically.
+
+1. **Run safe synthetic demo monitoring (populates realistic alerts for the dashboard without touching a network interface):**
+   ```powershell
+   .\.venv\Scripts\python.exe scripts/run_monitor.py --demo
+   ```
+
+2. **Run authorized live monitoring on an interface you own or are authorized to monitor:**
+   ```powershell
+   .\.venv\Scripts\python.exe scripts/run_monitor.py --live --interface "Wi-Fi" --limit 100 --timeout 30 --filter "tcp or udp"
+   ```
+   Press `Ctrl+C` to stop capture gracefully, flush remaining flows, evaluate them, and save any suspicious alerts to SQLite.
+
 ## Running Tests
 
 ```powershell
@@ -209,3 +227,4 @@ Open `http://127.0.0.1:5000/` after running `.\.venv\Scripts\python.exe run.py`:
 - [x] Phase 7: Optional AbuseIPDB `ThreatIntelService`, TTL cache, `GET /api/threat-intel/<ip>`, and `DetectionEngine` integration
 - [x] Phase 8: Optional sanitized `LLMExplainer`, structured JSON validation, fallback explanations, and `POST /api/alerts/<id>/explain`
 - [x] Phase 9: Live security dashboard with 3-second polling, monitoring toggle, filters, alert modal, and on-demand explanation button
+- [x] Phase 10: End-to-end `MonitoringService` pipeline and `scripts/run_monitor.py` (`--demo` / `--live`)
