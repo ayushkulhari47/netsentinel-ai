@@ -26,7 +26,8 @@ netsentinel-ai/
 │   │   └── predict.py       # Reusable IsolationForest prediction helpers
 │   ├── services/
 │   │   ├── __init__.py      # Service layer package marker
-│   │   └── flow_aggregator.py# Deterministic 5-tuple bidirectional flow aggregator
+│   │   ├── flow_aggregator.py# Deterministic 5-tuple bidirectional flow aggregator
+│   │   └── packet_capture.py# Controlled Scapy metadata-only packet capture service
 │   ├── static/
 │   │   ├── css/style.css    # Dashboard stylesheet
 │   │   └── js/dashboard.js  # Live API polling & Chart.js severity chart
@@ -34,12 +35,14 @@ netsentinel-ai/
 │       └── dashboard.html   # Main dashboard HTML template
 ├── scripts/
 │   ├── generate_demo_data.py# Synthetic benign & anomalous flow data generator
+│   ├── run_capture.py       # Controlled packet capture CLI (--demo / --live)
 │   └── train_model.py       # Train IsolationForest on benign flows & evaluate
 ├── tests/
 │   ├── test_alerts.py       # Alert model and API endpoint tests
 │   ├── test_flow_aggregator.py# FlowAggregator unit tests
 │   ├── test_health.py       # Health and homepage route tests
-│   └── test_ml.py           # Feature schema, training, evaluation & prediction tests
+│   ├── test_ml.py           # Feature schema, training, evaluation & prediction tests
+│   └── test_packet_capture.py# Mocked Scapy packet capture & CLI safety tests
 ├── .env.example             # Sample environment configuration
 ├── .gitignore               # Git ignore rules for secrets, DBs, models, and caches
 ├── README.md                # Project documentation
@@ -121,6 +124,25 @@ NetSentinel AI uses an unsupervised `IsolationForest` model trained **only on be
 - **Inactivity Timeout & Flushing:** Flows idle for at least `inactivity_timeout` seconds are expired via `flush_expired(current_time=...)` (or an injected `time_fn`), and all remaining flows can be drained via `flush_all()`.
 - **Output Compatibility:** Every returned dictionary preserves `source_ip` and `destination_ip` for alert reporting and satisfies `app/ml/feature_schema.py` (`validate_flow_record()` and `predict_flow()`).
 
+## Controlled Packet Capture & Legal/Safety Notice
+
+> **Important Legal & Safety Notice:**
+> - **Authorized Use Only:** Only run live packet capture on a network interface you own or have explicit written authorization to monitor. Unauthorized network interception may violate local, state, or federal laws and organizational policies.
+> - **Metadata Only:** `app/services/packet_capture.py` uses Scapy with `store=False` and extracts only packet header metadata (`timestamp`, `source_ip`, `destination_ip`, `source_port`, `destination_port`, `protocol`, `packet_length`, `tcp_flags`). Packet payloads are never captured, stored, or logged.
+> - **No Auto-Capture:** Starting the Flask web application (`run.py`) never starts packet capture.
+> - **Explicit `--live` Guard:** `scripts/run_capture.py` refuses to start live capture unless `--live` is explicitly provided.
+
+1. **Run safe synthetic demo mode (no network interface touched):**
+   ```powershell
+   .\.venv\Scripts\python.exe scripts/run_capture.py --demo
+   ```
+
+2. **Run authorized live capture on an interface you control:**
+   ```powershell
+   .\.venv\Scripts\python.exe scripts/run_capture.py --live --interface "Wi-Fi" --limit 50 --timeout 15 --filter "tcp or udp"
+   ```
+   Press `Ctrl+C` at any time to stop capture gracefully and flush active flows.
+
 ## Running Tests
 
 ```powershell
@@ -133,4 +155,5 @@ NetSentinel AI uses an unsupervised `IsolationForest` model trained **only on be
 - [x] Phase 2: SQLite `Alert` model, validated `/api/alerts` and `/api/summary` endpoints, and live dashboard integration
 - [x] Phase 3: ML flow schema, synthetic dataset generator, `IsolationForest` training/evaluation, and reusable prediction module
 - [x] Phase 4: Bidirectional `FlowAggregator` service with inactivity expiration and ML-compatible flow output
-- [ ] Phase 5+: Live packet capture (Scapy) integration (upcoming)
+- [x] Phase 5: Controlled Scapy metadata-only `PacketCaptureService` and `scripts/run_capture.py` CLI (`--demo` / `--live`)
+- [ ] Phase 6+: End-to-end live capture -> ML inference -> alert pipeline integration (upcoming)
