@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ app_name }} — Threat Detection Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" defer></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}" defer></script>
+</head>
+<body>
+    <header class="topbar">
+        <div class="brand">
+            <span class="brand-icon" aria-hidden="true">&#9670;</span>
+            <div>
+                <h1>{{ app_name }}</h1>
+                <p class="subtitle">AI-Powered Cybersecurity Threat Detection</p>
+            </div>
+        </div>
+        <div class="status-group">
+            <span id="health-badge" class="badge badge-pending">Checking API...</span>
+            <span class="version-tag">v{{ app_version }}</span>
+        </div>
+    </header>
+
+    <main class="container">
+        <section class="kpi-grid" aria-label="System summary">
+            <article class="card kpi-card">
+                <h2>Packet Capture</h2>
+                <p class="kpi-value" id="capture-status">Standby</p>
+                <p class="kpi-note">Not yet implemented</p>
+            </article>
+            <article class="card kpi-card">
+                <h2>Packets Analyzed</h2>
+                <p class="kpi-value">0</p>
+                <p class="kpi-note">Awaiting traffic feed</p>
+            </article>
+            <article class="card kpi-card">
+                <h2>Anomalies Detected</h2>
+                <p class="kpi-value">0</p>
+                <p class="kpi-note">IsolationForest idle</p>
+            </article>
+            <article class="card kpi-card">
+                <h2>Threat Level</h2>
+                <p class="kpi-value threat-low">Low</p>
+                <p class="kpi-note">Baseline state</p>
+            </article>
+        </section>
+
+        <section class="content-grid">
+            <article class="card chart-card">
+                <div class="card-header">
+                    <h2>Network Traffic Overview</h2>
+                    <span class="pill">Placeholder Data</span>
+                </div>
+                <div class="chart-wrapper">
+                    <canvas id="trafficChart" aria-label="Network traffic chart"></canvas>
+                </div>
+            </article>
+
+            <article class="card alerts-card">
+                <div class="card-header">
+                    <h2>Recent Security Alerts</h2>
+                    <span class="pill">0 Active</span>
+                </div>
+                <div class="empty-state">
+                    <p>No threat events recorded yet.</p>
+                    <p class="muted">Packet capture and ML anomaly scoring will appear here in upcoming tasks.</p>
+                </div>
+            </article>
+        </section>
+    </main>
+</body>
+</html>
