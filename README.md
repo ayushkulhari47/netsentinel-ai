@@ -29,7 +29,8 @@ netsentinel-ai/
 │   │   ├── detection_engine.py# Hybrid ML + rules + threat-intel risk scoring engine
 │   │   ├── flow_aggregator.py# Deterministic 5-tuple bidirectional flow aggregator
 │   │   ├── packet_capture.py# Controlled Scapy metadata-only packet capture service
-│   │   └── rule_engine.py   # Explainable heuristic flow rules
+│   │   ├── rule_engine.py   # Explainable heuristic flow rules
+│   │   └── threat_intel.py  # Optional AbuseIPDB lookup with TTL cache & safety guards
 │   ├── static/
 │   │   ├── css/style.css    # Dashboard stylesheet
 │   │   └── js/dashboard.js  # Live API polling & Chart.js severity chart
@@ -45,7 +46,8 @@ netsentinel-ai/
 │   ├── test_flow_aggregator.py# FlowAggregator unit tests
 │   ├── test_health.py       # Health and homepage route tests
 │   ├── test_ml.py           # Feature schema, training, evaluation & prediction tests
-│   └── test_packet_capture.py# Mocked Scapy packet capture & CLI safety tests
+│   ├── test_packet_capture.py# Mocked Scapy packet capture & CLI safety tests
+│   └── test_threat_intel.py # Mocked AbuseIPDB lookup, caching & API route tests
 ├── .env.example             # Sample environment configuration
 ├── .gitignore               # Git ignore rules for secrets, DBs, models, and caches
 ├── README.md                # Project documentation
@@ -60,6 +62,7 @@ netsentinel-ai/
 - `GET /api/alerts` — List stored alerts (supports `?severity=`, `?status=`, `?limit=`)
 - `POST /api/alerts` — Validate and persist a new security alert
 - `GET /api/summary` — Aggregated counts (`total_alerts`, `critical_alerts`, `high_alerts`, `suspicious_ip_count`)
+- `GET /api/threat-intel/<ip>` — Optional AbuseIPDB IP reputation lookup (returns `private` for non-public IPs, `unknown` when `ABUSEIPDB_API_KEY` is unconfigured)
 
 ## Getting Started
 
@@ -160,6 +163,15 @@ NetSentinel AI uses an unsupervised `IsolationForest` model trained **only on be
   - `75` – `100`: `critical` (suspicious; `Alert` persisted when `persist=True`)
 - **Explainable Output:** Every assessment returns `attack_type`, `severity`, `anomaly_score`, `threat_score`, `confidence`, `evidence`, cautious `explanation` (using terms like *"possible"* and *"suspicious"*), and `recommended_action`.
 
+## Optional Threat-Intelligence Lookup
+
+`app/services/threat_intel.py` provides `ThreatIntelService`, an optional AbuseIPDB integration exposed via `GET /api/threat-intel/<ip>` and supported by `DetectionEngine`:
+
+- **Opt-In via `ABUSEIPDB_API_KEY`:** If `ABUSEIPDB_API_KEY` is missing or left as a placeholder, no external HTTP requests are made (`reputation: "unknown"`).
+- **Private & Reserved IP Protection:** Private, loopback, and reserved IPs immediately return `reputation: "private"` without leaving the host.
+- **Timeouts, Rate Limits & Secret Safety:** Uses a 5-second request timeout, handles HTTP `429`/errors/invalid JSON safely, and never exposes the API key in logs or API responses.
+- **TTL Caching:** Caches successful lookups per IP in memory (`THREAT_INTEL_CACHE_TTL`, default `900` seconds) and uses cautious wording (*"reported by the provider"*).
+
 ## Running Tests
 
 ```powershell
@@ -174,4 +186,4 @@ NetSentinel AI uses an unsupervised `IsolationForest` model trained **only on be
 - [x] Phase 4: Bidirectional `FlowAggregator` service with inactivity expiration and ML-compatible flow output
 - [x] Phase 5: Controlled Scapy metadata-only `PacketCaptureService` and `scripts/run_capture.py` CLI (`--demo` / `--live`)
 - [x] Phase 6: Explainable `RuleEngine` and `DetectionEngine` combining ML, rules, and optional threat-intel metadata
-- [ ] Phase 7+: End-to-end orchestration & optional external enrichment integrations (upcoming)
+- [x] Phase 7: Optional AbuseIPDB `ThreatIntelService`, TTL cache, `GET /api/threat-intel/<ip>`, and `DetectionEngine` integration

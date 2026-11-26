@@ -4,6 +4,7 @@ import os
 from dotenv import load_dotenv
 from flask import Flask
 from app.extensions import db
+from app.services.threat_intel import DEFAULT_CACHE_TTL_SECONDS, ThreatIntelService
 
 
 def create_app(test_config=None):
@@ -22,12 +23,21 @@ def create_app(test_config=None):
         APP_VERSION="0.1.0",
         SQLALCHEMY_DATABASE_URI=database_url,
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        ABUSEIPDB_API_KEY=None,
+        THREAT_INTEL_CACHE_TTL=int(
+            os.environ.get("THREAT_INTEL_CACHE_TTL", str(DEFAULT_CACHE_TTL_SECONDS))
+        ),
     )
 
     if test_config is not None:
         app.config.from_mapping(test_config)
 
     db.init_app(app)
+
+    app.extensions["threat_intel_service"] = ThreatIntelService(
+        api_key=app.config.get("ABUSEIPDB_API_KEY"),
+        cache_ttl_seconds=app.config.get("THREAT_INTEL_CACHE_TTL", DEFAULT_CACHE_TTL_SECONDS),
+    )
 
     with app.app_context():
         from app import models  # noqa: F401

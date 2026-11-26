@@ -129,3 +129,18 @@ def get_summary():
             "suspicious_ip_count": suspicious_ip_count,
         }
     ), 200
+
+
+@main_bp.route("/api/threat-intel/<ip_address>", methods=["GET"])
+def get_threat_intel(ip_address):
+    """Look up optional AbuseIPDB reputation metadata for an IP address."""
+    service = current_app.extensions.get("threat_intel_service")
+    if service is None:
+        return jsonify({"error": "Threat intelligence service is not configured."}), 500
+
+    try:
+        result = service.lookup_ip(ip_address)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify(result), 200

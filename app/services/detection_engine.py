@@ -52,29 +52,51 @@ def _evaluate_threat_intel(threat_intel):
     evidence = []
     points = 0.0
 
+    reputation = str(threat_intel.get("reputation", "")).strip().lower()
+    if reputation in {"private", "unknown", "clean"}:
+        return 0.0, []
+
     malicious = bool(threat_intel.get("malicious", False))
-    raw_score = threat_intel.get("reputation_score", threat_intel.get("score"))
-    source_name = threat_intel.get("source", "threat intelligence")
+    raw_score = threat_intel.get(
+        "abuse_score",
+        threat_intel.get("reputation_score", threat_intel.get("score")),
+    )
+    provider = threat_intel.get("provider", threat_intel.get("source", "provider"))
+    categories = threat_intel.get("categories") or []
 
+    score_val = None
     if isinstance(raw_score, numbers.Real) and not isinstance(raw_score, bool):
-        rep = max(0.0, min(100.0, float(raw_score)))
-        if rep >= 75.0:
+        score_val = max(0.0, min(100.0, float(raw_score)))
+        if score_val >= 75.0:
             points = 30.0
-        elif rep >= 40.0:
+        elif score_val >= 40.0:
             points = 20.0
-        elif rep > 0.0:
+        elif score_val > 0.0:
             points = 10.0
-        if rep >= 40.0:
-            evidence.append(
-                f"Provided {source_name} metadata indicates elevated risk "
-                f"(reputation score {rep:.0f}/100)."
-            )
 
-    if malicious and points < 25.0:
+    if reputation == "reported" and points < 25.0:
         points = 25.0
-        evidence.append(
-            f"Provided {source_name} metadata flagged this endpoint as potentially suspicious."
+    elif reputation == "suspicious" and points < 15.0:
+        points = 15.0
+    elif malicious and points < 25.0:
+        points = 25.0
+
+    if points > 0.0:
+        score_text = f" (abuse score {score_val:.0f}/100)" if score_val is not None else ""
+        cat_text = (
+            f" in categories: {', '.join(str(c) for c in categories)}"
+            if isinstance(categories, list) and categories
+            else ""
         )
+        if reputation in {"reported", "suspicious"}:
+            evidence.append(
+                f"Endpoint was {reputation} by the provider ({provider}){score_text}{cat_text}."
+            )
+        else:
+            evidence.append(
+                f"Provided {provider} metadata flagged this endpoint as potentially "
+                f"suspicious{score_text}{cat_text}."
+            )
 
     return points, evidence
 
@@ -99,12 +121,14 @@ class DetectionEngine:
         model_path=DEFAULT_MODEL_PATH,
         model_bundle=None,
         rule_engine=None,
+        threat_intel_service=None,
         suspicious_threshold=25.0,
     ):
         """Initialize the detection engine with local ML path and rule engine."""
         self.model_path = model_path
         self._model_bundle = model_bundle
         self.rule_engine = rule_engine if rule_engine is not None else RuleEngine()
+        self.threat_intel_service = threat_intel_service
         self.suspicious_threshold = float(suspicious_threshold)
 
     def _run_ml(self, cleaned_flow):
@@ -134,7 +158,12 @@ class DetectionEngine:
 
         ml_available, ml_result = self._run_ml(cleaned_flow)
         rule_result = self.rule_engine.evaluate(flow)
-        intel_points, intel_evidence = _evaluate_threat_intel(threat_intel)
+
+        effective_intel = threat_intel
+        if effective_intel is None and self.threat_intel_service is not None and source_ip is not None:
+            effective_intel = self.threat_intel_service.lookup_ip(source_ip)
+
+        intel_points, intel_evidence = _evaluate_threat_intel(effective_intel)
 
         evidence = []
         ml_points = 0.0
