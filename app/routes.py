@@ -144,3 +144,40 @@ def get_threat_intel(ip_address):
         return jsonify({"error": str(exc)}), 400
 
     return jsonify(result), 200
+
+
+@main_bp.route("/api/alerts/<int:alert_id>/explain", methods=["POST"])
+def explain_alert(alert_id):
+    """Generate a structured explanation for an existing alert on demand."""
+    alert = db.session.get(Alert, alert_id)
+    if alert is None:
+        return jsonify({"error": "Alert not found."}), 404
+
+    explainer = current_app.extensions.get("llm_explainer")
+    if explainer is None:
+        return jsonify({"error": "LLM explainer service is not configured."}), 500
+
+    payload = {}
+    if request.data:
+        parsed = request.get_json(silent=True)
+        if not isinstance(parsed, dict):
+            return jsonify({"error": "Request body must be a JSON object."}), 400
+        payload = parsed
+
+    structured = explainer.explain(
+        alert.to_dict(),
+        threat_intel=payload.get("threat_intel"),
+        flow_stats=payload.get("flow_stats"),
+    )
+
+    # Update only the human-readable explanation; never alter ML score, threat_score, or severity.
+    alert.explanation = structured["summary"]
+    db.session.commit()
+
+    return jsonify(
+        {
+            "alert_id": alert.id,
+            "alert": alert.to_dict(),
+            "explanation": structured,
+        }
+    ), 200

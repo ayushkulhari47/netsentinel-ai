@@ -28,6 +28,7 @@ netsentinel-ai/
 │   │   ├── __init__.py      # Service layer package marker
 │   │   ├── detection_engine.py# Hybrid ML + rules + threat-intel risk scoring engine
 │   │   ├── flow_aggregator.py# Deterministic 5-tuple bidirectional flow aggregator
+│   │   ├── llm_explainer.py # Optional sanitized OpenAI alert explanation generator
 │   │   ├── packet_capture.py# Controlled Scapy metadata-only packet capture service
 │   │   ├── rule_engine.py   # Explainable heuristic flow rules
 │   │   └── threat_intel.py  # Optional AbuseIPDB lookup with TTL cache & safety guards
@@ -45,6 +46,7 @@ netsentinel-ai/
 │   ├── test_detection_engine.py# RuleEngine and DetectionEngine tests
 │   ├── test_flow_aggregator.py# FlowAggregator unit tests
 │   ├── test_health.py       # Health and homepage route tests
+│   ├── test_llm_explainer.py# Mocked LLM explainer & /explain endpoint tests
 │   ├── test_ml.py           # Feature schema, training, evaluation & prediction tests
 │   ├── test_packet_capture.py# Mocked Scapy packet capture & CLI safety tests
 │   └── test_threat_intel.py # Mocked AbuseIPDB lookup, caching & API route tests
@@ -61,6 +63,7 @@ netsentinel-ai/
 - `GET /health` — Service health status JSON
 - `GET /api/alerts` — List stored alerts (supports `?severity=`, `?status=`, `?limit=`)
 - `POST /api/alerts` — Validate and persist a new security alert
+- `POST /api/alerts/<id>/explain` — Generate a structured explanation on demand (OpenAI if configured, else rule-based fallback)
 - `GET /api/summary` — Aggregated counts (`total_alerts`, `critical_alerts`, `high_alerts`, `suspicious_ip_count`)
 - `GET /api/threat-intel/<ip>` — Optional AbuseIPDB IP reputation lookup (returns `private` for non-public IPs, `unknown` when `ABUSEIPDB_API_KEY` is unconfigured)
 
@@ -172,6 +175,15 @@ NetSentinel AI uses an unsupervised `IsolationForest` model trained **only on be
 - **Timeouts, Rate Limits & Secret Safety:** Uses a 5-second request timeout, handles HTTP `429`/errors/invalid JSON safely, and never exposes the API key in logs or API responses.
 - **TTL Caching:** Caches successful lookups per IP in memory (`THREAT_INTEL_CACHE_TTL`, default `900` seconds) and uses cautious wording (*"reported by the provider"*).
 
+## Optional LLM-Powered Threat Explanations
+
+`app/services/llm_explainer.py` provides `LLMExplainer`, exposed on demand via `POST /api/alerts/<id>/explain`:
+
+- **Setup:** Set `OPENAI_API_KEY` and optionally `OPENAI_MODEL` (defaults to `gpt-4o-mini`) in your local `.env` file.
+- **Privacy & Sanitization Limitations:** Only allowlisted metadata (`attack_type`, `severity`, `threat_score`, `anomaly_score`, `rule_evidence`, `threat_intel_summary`, and numeric/protocol flow statistics) is sent to OpenAI, with secret-pattern redaction applied. Packet payloads, raw packet data, passwords, tokens, and API keys are never transmitted. Do not enable OpenAI enrichment if your policy prohibits sending aggregated alert metadata to an external LLM provider.
+- **Score Integrity:** The LLM generates explanatory text only (`summary`, `why_it_matters`, `evidence`, `recommended_actions`, `confidence_note`) and never alters `anomaly_score`, `threat_score`, or `severity`.
+- **Safe Fallback:** If `OPENAI_API_KEY` is missing, an API call fails, or the returned JSON fails schema validation, `LLMExplainer` automatically returns a deterministic rule-based fallback explanation.
+
 ## Running Tests
 
 ```powershell
@@ -187,3 +199,4 @@ NetSentinel AI uses an unsupervised `IsolationForest` model trained **only on be
 - [x] Phase 5: Controlled Scapy metadata-only `PacketCaptureService` and `scripts/run_capture.py` CLI (`--demo` / `--live`)
 - [x] Phase 6: Explainable `RuleEngine` and `DetectionEngine` combining ML, rules, and optional threat-intel metadata
 - [x] Phase 7: Optional AbuseIPDB `ThreatIntelService`, TTL cache, `GET /api/threat-intel/<ip>`, and `DetectionEngine` integration
+- [x] Phase 8: Optional sanitized `LLMExplainer`, structured JSON validation, fallback explanations, and `POST /api/alerts/<id>/explain`

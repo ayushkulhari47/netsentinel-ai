@@ -4,6 +4,7 @@ import os
 from dotenv import load_dotenv
 from flask import Flask
 from app.extensions import db
+from app.services.llm_explainer import LLMExplainer
 from app.services.threat_intel import DEFAULT_CACHE_TTL_SECONDS, ThreatIntelService
 
 
@@ -27,6 +28,8 @@ def create_app(test_config=None):
         THREAT_INTEL_CACHE_TTL=int(
             os.environ.get("THREAT_INTEL_CACHE_TTL", str(DEFAULT_CACHE_TTL_SECONDS))
         ),
+        OPENAI_API_KEY=None,
+        OPENAI_MODEL=None,
     )
 
     if test_config is not None:
@@ -37,6 +40,10 @@ def create_app(test_config=None):
     app.extensions["threat_intel_service"] = ThreatIntelService(
         api_key=app.config.get("ABUSEIPDB_API_KEY"),
         cache_ttl_seconds=app.config.get("THREAT_INTEL_CACHE_TTL", DEFAULT_CACHE_TTL_SECONDS),
+    )
+    app.extensions["llm_explainer"] = LLMExplainer(
+        api_key=app.config.get("OPENAI_API_KEY"),
+        model=app.config.get("OPENAI_MODEL"),
     )
 
     with app.app_context():
