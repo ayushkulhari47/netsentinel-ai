@@ -26,8 +26,10 @@ netsentinel-ai/
 │   │   └── predict.py       # Reusable IsolationForest prediction helpers
 │   ├── services/
 │   │   ├── __init__.py      # Service layer package marker
+│   │   ├── detection_engine.py# Hybrid ML + rules + threat-intel risk scoring engine
 │   │   ├── flow_aggregator.py# Deterministic 5-tuple bidirectional flow aggregator
-│   │   └── packet_capture.py# Controlled Scapy metadata-only packet capture service
+│   │   ├── packet_capture.py# Controlled Scapy metadata-only packet capture service
+│   │   └── rule_engine.py   # Explainable heuristic flow rules
 │   ├── static/
 │   │   ├── css/style.css    # Dashboard stylesheet
 │   │   └── js/dashboard.js  # Live API polling & Chart.js severity chart
@@ -39,6 +41,7 @@ netsentinel-ai/
 │   └── train_model.py       # Train IsolationForest on benign flows & evaluate
 ├── tests/
 │   ├── test_alerts.py       # Alert model and API endpoint tests
+│   ├── test_detection_engine.py# RuleEngine and DetectionEngine tests
 │   ├── test_flow_aggregator.py# FlowAggregator unit tests
 │   ├── test_health.py       # Health and homepage route tests
 │   ├── test_ml.py           # Feature schema, training, evaluation & prediction tests
@@ -143,6 +146,20 @@ NetSentinel AI uses an unsupervised `IsolationForest` model trained **only on be
    ```
    Press `Ctrl+C` at any time to stop capture gracefully and flush active flows.
 
+## Explainable Detection & Risk-Scoring Design
+
+`app/services/rule_engine.py` and `app/services/detection_engine.py` combine machine learning with transparent heuristics to evaluate aggregated flows without claiming certainty:
+
+- **Heuristic Rules (`RuleEngine`):** Checks four categories—unusually high packet rate, unusually high byte rate, unusually large flow size, and suspicious protocol/port combinations (e.g., UDP targeting TCP admin ports, ICMP with non-zero ports, or commonly abused ports)—recording human-readable evidence for each matched rule.
+- **ML Integration (`app/ml/predict.py`):** Runs the local `IsolationForest` pipeline when available (`models/isolation_forest.joblib`) and falls back gracefully to rule-based evaluation if the local model file is missing.
+- **Optional Threat Intel Input:** Accepts optional pre-fetched `threat_intel` metadata in memory without making external API calls.
+- **Risk Score (0–100) & Severity Mapping:**
+  - `0` – `24.9`: `low` (normal baseline; **no** `Alert` is persisted)
+  - `25` – `49.9`: `medium` (suspicious; `Alert` persisted when `persist=True`)
+  - `50` – `74.9`: `high` (suspicious; `Alert` persisted when `persist=True`)
+  - `75` – `100`: `critical` (suspicious; `Alert` persisted when `persist=True`)
+- **Explainable Output:** Every assessment returns `attack_type`, `severity`, `anomaly_score`, `threat_score`, `confidence`, `evidence`, cautious `explanation` (using terms like *"possible"* and *"suspicious"*), and `recommended_action`.
+
 ## Running Tests
 
 ```powershell
@@ -156,4 +173,5 @@ NetSentinel AI uses an unsupervised `IsolationForest` model trained **only on be
 - [x] Phase 3: ML flow schema, synthetic dataset generator, `IsolationForest` training/evaluation, and reusable prediction module
 - [x] Phase 4: Bidirectional `FlowAggregator` service with inactivity expiration and ML-compatible flow output
 - [x] Phase 5: Controlled Scapy metadata-only `PacketCaptureService` and `scripts/run_capture.py` CLI (`--demo` / `--live`)
-- [ ] Phase 6+: End-to-end live capture -> ML inference -> alert pipeline integration (upcoming)
+- [x] Phase 6: Explainable `RuleEngine` and `DetectionEngine` combining ML, rules, and optional threat-intel metadata
+- [ ] Phase 7+: End-to-end orchestration & optional external enrichment integrations (upcoming)
