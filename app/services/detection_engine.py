@@ -8,7 +8,11 @@ from app.extensions import db
 from app.ml.feature_schema import validate_flow_record
 from app.ml.predict import get_default_model_path, predict_flow
 from app.models import Alert
-from app.services.rule_engine import RuleEngine
+from app.services.rule_engine import (
+    RuleEngine,
+    is_established_bidirectional_tcp,
+    is_likely_normal_web_traffic,
+)
 
 
 def map_risk_to_severity(threat_score):
@@ -177,16 +181,46 @@ class DetectionEngine:
         intel_points, intel_evidence = _evaluate_threat_intel(effective_intel)
 
         evidence = []
+        established_tcp = rule_result.get(
+            "established_bidirectional_tcp",
+            is_established_bidirectional_tcp(flow),
+        )
+        normal_web_flow = rule_result.get(
+            "likely_normal_web_traffic",
+            is_likely_normal_web_traffic(flow),
+        )
+
+        ml_is_anomaly = ml_available and ml_result["prediction"] == "anomaly"
+        ml_strong = ml_is_anomaly and float(ml_result["confidence"]) >= 0.85
+
         ml_points = 0.0
+        ml_counts_as_indicator = False
         if ml_available:
-            if ml_result["prediction"] == "anomaly":
-                # Base 30 points for IsolationForest outlier, scaled up to 45 by confidence.
-                ml_points = 30.0 + max(0.0, (ml_result["confidence"] - 0.5) * 30.0)
-                evidence.append(
-                    f"IsolationForest flagged a possible statistical anomaly "
-                    f"(anomaly_score={ml_result['anomaly_score']:.4f}, "
-                    f"confidence={ml_result['confidence']:.2f})."
-                )
+            if ml_is_anomaly:
+                if (
+                    normal_web_flow
+                    and not ml_strong
+                    and not rule_result["matched_rules"]
+                    and intel_points <= 0.0
+                ):
+                    # Mild ML outlier on established HTTPS without corroborating evidence stays low.
+                    ml_points = 20.0
+                    evidence.append(
+                        f"ML model noted a mild statistical deviation "
+                        f"(anomaly_score={ml_result['anomaly_score']:.4f}, "
+                        f"confidence={ml_result['confidence']:.2f}), dampened for "
+                        f"established bidirectional HTTPS traffic."
+                    )
+                else:
+                    # Strong ML anomalies (confidence >= 0.85) or unestablished/corroborated flows.
+                    ml_points = 30.0 + max(0.0, (ml_result["confidence"] - 0.5) * 30.0)
+                    ml_counts_as_indicator = True
+                    strength = "strong" if ml_strong else "possible"
+                    evidence.append(
+                        f"ML model flagged a {strength} statistical anomaly "
+                        f"(anomaly_score={ml_result['anomaly_score']:.4f}, "
+                        f"confidence={ml_result['confidence']:.2f})."
+                    )
         else:
             evidence.append(
                 "Local ML model is unavailable; assessment used heuristic rules only."
@@ -194,24 +228,66 @@ class DetectionEngine:
 
         evidence.extend(rule_result["evidence"])
         evidence.extend(intel_evidence)
+        evidence.extend(rule_result.get("context_notes", []))
+
+        matched_rule_ids = [r["rule_id"] for r in rule_result["matched_rules"]]
+        independent_indicators = (
+            (1 if ml_counts_as_indicator else 0)
+            + len(matched_rule_ids)
+            + (1 if intel_points > 0.0 else 0)
+        )
 
         combined_score = ml_points + rule_result["rule_score"] + intel_points
         threat_score = round(min(100.0, max(0.0, combined_score)), 2)
+
+        cap_reasons = []
+        # Requirement 2: high_packet_rate alone is capped at maximum Medium severity (< 50).
+        if independent_indicators == 1 and matched_rule_ids == ["high_packet_rate"]:
+            if threat_score >= 50.0:
+                threat_score = 49.0
+            cap_reasons.append(
+                "high_packet_rate was the sole triggered indicator, capping severity at medium"
+            )
+
+        # Requirement 3: Critical severity (>= 75) requires at least two independent indicators.
+        if threat_score >= 75.0 and independent_indicators < 2:
+            threat_score = 74.0
+            cap_reasons.append(
+                "fewer than two independent indicators were present, capping severity at high"
+            )
+
         severity = map_risk_to_severity(threat_score)
         is_suspicious = threat_score >= self.suspicious_threshold
 
-        # Combine ML confidence with corroborating rule/intel signals into [0.0, 1.0].
-        signal_count = (
-            (1 if ml_available and ml_result["prediction"] == "anomaly" else 0)
-            + len(rule_result["matched_rules"])
-            + (1 if intel_points > 0 else 0)
+        # Requirement 7: Explain clearly why this severity level was assigned.
+        indicator_labels = []
+        if ml_counts_as_indicator:
+            indicator_labels.append("ml_anomaly")
+        indicator_labels.extend(matched_rule_ids)
+        if intel_points > 0.0:
+            indicator_labels.append("threat_intel")
+
+        rationale = (
+            f"Severity '{severity}' assigned (threat_score={threat_score:.1f}/100, "
+            f"independent_indicators={independent_indicators}"
         )
+        if indicator_labels:
+            rationale += f": {', '.join(indicator_labels)}"
+        if established_tcp:
+            rationale += "; established_bidirectional_tcp=True"
+        rationale += ")."
+        if cap_reasons:
+            rationale += " " + "; ".join(cap_reasons).capitalize() + "."
+        evidence.append(rationale)
+
+        # Combine ML confidence with corroborating rule/intel signals into [0.0, 1.0].
+        signal_count = independent_indicators
         if not is_suspicious:
             confidence = round(ml_result["confidence"] if ml_available else 0.5, 4)
             attack_type = "Normal Network Flow"
             explanation = (
                 "No suspicious indicators observed; flow metrics remain within normal "
-                "baseline thresholds."
+                "baseline thresholds. " + rationale
             )
         else:
             base_conf = ml_result["confidence"] if ml_available else 0.55
@@ -219,7 +295,7 @@ class DetectionEngine:
 
             if rule_result["attack_hints"]:
                 attack_type = rule_result["attack_hints"][0]
-            elif ml_available and ml_result["prediction"] == "anomaly":
+            elif ml_counts_as_indicator:
                 attack_type = "Possible Anomalous Network Flow"
             else:
                 attack_type = "Possible Suspicious Network Activity"

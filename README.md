@@ -171,7 +171,11 @@ NetSentinel AI uses an unsupervised `IsolationForest` model trained **only on be
   - `25` – `49.9`: `medium` (suspicious; `Alert` persisted when `persist=True`)
   - `50` – `74.9`: `high` (suspicious; `Alert` persisted when `persist=True`)
   - `75` – `100`: `critical` (suspicious; `Alert` persisted when `persist=True`)
-- **Explainable Output:** Every assessment returns `attack_type`, `severity`, `anomaly_score`, `threat_score`, `confidence`, `evidence`, cautious `explanation` (using terms like *"possible"* and *"suspicious"*), and `recommended_action`.
+- **Explainable Output:** Every assessment returns `attack_type`, `severity`, `anomaly_score`, `threat_score`, `confidence`, `evidence` (including exact severity-assignment rationale), cautious `explanation` (using terms like *"possible"* and *"suspicious"*), and `recommended_action`.
+- **False-Positive Guardrails:**
+  - Established bidirectional TCP flows with `ACK`/`PA` flags on standard web ports (`80`, `443`, `8080`, `8443`) are not flagged as floods solely from short burst packet rates, and mild ML drift (`confidence < 0.85`) without corroborating rules or threat intel stays `low`.
+  - `high_packet_rate` as the sole triggered indicator is capped at maximum `medium` severity (`< 50`).
+  - `critical` severity (`>= 75`) requires at least **two independent corroborating indicators** (e.g., strong ML anomaly, heuristic rules, or provider threat-intel reports).
 
 ## Optional Threat-Intelligence Lookup
 
@@ -297,3 +301,4 @@ Run the leak-free benchmark comparing the preserved `IsolationForest` baseline a
 - [x] Phase 10: End-to-end `MonitoringService` pipeline and `scripts/run_monitor.py` (`--demo` / `--live`)
 - [x] Phase 11: Real UNSW-NB15 training/evaluation (`scripts/train_unsw_model.py`) and `ML_MODEL_PATH` selection
 - [x] Phase 12: Leak-free UNSW-NB15 benchmarking (`IsolationForest` vs `RandomForestClassifier`) and `models/unsw_best_model.joblib`
+- [x] Phase 13: Live-traffic false-positive guardrails (bidirectional TCP/HTTPS awareness, multi-indicator `critical` requirement, severity rationale)

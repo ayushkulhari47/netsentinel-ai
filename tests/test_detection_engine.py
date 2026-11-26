@@ -259,3 +259,163 @@ def test_flow_aggregator_to_detection_engine_pipeline(app, trained_model_path):
         assert result["severity"] == "low"
         assert result["is_suspicious"] is False
         assert Alert.query.count() == 0
+
+
+def test_normal_bidirectional_https_burst_is_not_classified_as_flood(app, tmp_path):
+    """Established bidirectional HTTPS traffic with ACK/PA flags must not trigger flood alerts."""
+    missing_model = tmp_path / "no_model.joblib"
+
+    https_burst_flow = {
+        "source_ip": "192.168.1.50",
+        "destination_ip": "93.184.216.34",
+        "duration": 0.02,
+        "protocol": "TCP",
+        "source_port": 54120,
+        "destination_port": 443,
+        "flow_bytes": 24_000.0,
+        "flow_packets": 24,
+        "forward_packets": 10,
+        "backward_packets": 14,
+        "average_packet_size": 1000.0,
+        "packet_rate": 1200.0,  # High short burst rate on 443
+        "byte_rate": 600_000.0,
+        "tcp_flags": ["A", "PA", "S", "SA"],
+    }
+
+    with app.app_context():
+        engine = DetectionEngine(model_path=missing_model)
+        result = engine.analyze_flow(https_burst_flow, persist=True)
+
+        assert result["is_suspicious"] is False
+        assert result["severity"] == "low"
+        assert "flood" not in result["attack_type"].lower()
+        assert result["alert"] is None
+        assert any("Severity 'low' assigned" in item for item in result["evidence"])
+        assert Alert.query.count() == 0
+
+
+def test_mild_ml_outlier_dampened_on_https_while_strong_ml_remains_valid(app, monkeypatch):
+    """Mild ML outliers on HTTPS stay low; strong ML anomalies (confidence >= 0.85) remain valid."""
+    https_flow = _normal_flow()
+
+    with app.app_context():
+        engine = DetectionEngine(model_bundle={"pipeline": object()})
+
+        # Mild ML outlier (confidence=0.72) on established HTTPS -> dampened to low
+        monkeypatch.setattr(
+            "app.services.detection_engine.predict_flow",
+            lambda *_a, **_kw: {"anomaly_score": 0.08, "prediction": "anomaly", "confidence": 0.72},
+        )
+        mild_res = engine.analyze_flow(https_flow, persist=True)
+        assert mild_res["severity"] == "low"
+        assert mild_res["is_suspicious"] is False
+        assert Alert.query.count() == 0
+
+        # Strong ML anomaly (confidence=0.95) -> kept as valid evidence
+        monkeypatch.setattr(
+            "app.services.detection_engine.predict_flow",
+            lambda *_a, **_kw: {"anomaly_score": 0.45, "prediction": "anomaly", "confidence": 0.95},
+        )
+        strong_res = engine.analyze_flow(https_flow, persist=True)
+        assert strong_res["is_suspicious"] is True
+        assert strong_res["severity"] in {"medium", "high"}
+        assert strong_res["alert"] is not None
+        assert Alert.query.count() == 1
+
+
+def test_single_high_packet_rate_rule_capped_at_medium(app, tmp_path):
+    """high_packet_rate as the sole indicator must never exceed medium severity."""
+    missing_model = tmp_path / "no_model.joblib"
+
+    udp_high_pps = {
+        "source_ip": "198.51.100.30",
+        "destination_ip": "10.0.0.10",
+        "duration": 0.1,
+        "protocol": "UDP",
+        "source_port": 51000,
+        "destination_port": 5300,
+        "flow_bytes": 20_000.0,
+        "flow_packets": 300,
+        "forward_packets": 300,
+        "backward_packets": 0,
+        "average_packet_size": 66.67,
+        "packet_rate": 3000.0,  # extreme packet_rate alone
+        "byte_rate": 200_000.0,  # below high_byte_rate threshold
+    }
+
+    with app.app_context():
+        engine = DetectionEngine(model_path=missing_model)
+        result = engine.analyze_flow(udp_high_pps, persist=True)
+
+        assert result["is_suspicious"] is True
+        assert result["severity"] == "medium"
+        assert result["threat_score"] < 50.0
+        assert any("Severity 'medium' assigned" in item for item in result["evidence"])
+        assert Alert.query.count() == 1
+
+
+def test_critical_requires_two_independent_indicators(app, tmp_path):
+    """Critical severity requires >= 2 independent indicators; 1 indicator is capped at high."""
+    missing_model = tmp_path / "no_model.joblib"
+
+    class SingleHighRuleEngine:
+        def evaluate(self, _flow):
+            return {
+                "rule_score": 85.0,
+                "matched_rules": [
+                    {
+                        "rule_id": "suspicious_protocol_port",
+                        "title": "Single Strong Rule",
+                        "points": 85.0,
+                        "attack_hint": "Possible Suspicious Activity",
+                        "detail": "Single synthetic high-weight indicator.",
+                    }
+                ],
+                "evidence": ["Single synthetic high-weight indicator."],
+                "attack_hints": ["Possible Suspicious Activity"],
+                "context_notes": [],
+                "established_bidirectional_tcp": False,
+                "likely_normal_web_traffic": False,
+            }
+
+    with app.app_context():
+        # Single indicator scoring 85 -> capped at high (74.0)
+        single_engine = DetectionEngine(model_path=missing_model, rule_engine=SingleHighRuleEngine())
+        single_res = single_engine.analyze_flow(_normal_flow(), persist=True)
+        assert single_res["severity"] == "high"
+        assert single_res["threat_score"] == 74.0
+        assert any("fewer than two independent indicators" in item.lower() for item in single_res["evidence"])
+
+        # Multiple corroborating indicators -> reaches critical
+        multi_engine = DetectionEngine(model_path=missing_model)
+        multi_res = multi_engine.analyze_flow(_high_rate_anomalous_flow(), persist=True)
+        assert multi_res["severity"] == "critical"
+        assert multi_res["threat_score"] >= 75.0
+        assert any("independent_indicators=4" in item for item in multi_res["evidence"])
+
+
+def test_confirmed_threat_intel_remains_valid_evidence(app, tmp_path):
+    """A confirmed threat-intel report should persist an alert with clear rationale."""
+    missing_model = tmp_path / "no_model.joblib"
+
+    with app.app_context():
+        engine = DetectionEngine(model_path=missing_model)
+        result = engine.analyze_flow(
+            _normal_flow(),
+            threat_intel={
+                "ip": "192.168.1.25",
+                "reputation": "reported",
+                "provider": "abuseipdb",
+                "abuse_score": 92,
+                "categories": ["Port Scan", "Brute-Force"],
+            },
+            persist=True,
+        )
+
+        assert result["is_suspicious"] is True
+        assert result["severity"] == "medium"
+        assert result["threat_score"] == 30.0
+        assert any("reported by the provider" in item.lower() for item in result["evidence"])
+        assert any("Severity 'medium' assigned" in item for item in result["evidence"])
+        assert result["alert"] is not None
+        assert Alert.query.count() == 1
