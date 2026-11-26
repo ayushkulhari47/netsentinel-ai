@@ -5,9 +5,15 @@ from app import create_app
 
 
 @pytest.fixture()
-def client():
-    """Create a Flask test client using testing configuration."""
-    app = create_app({"TESTING": True})
+def client(tmp_path):
+    """Create a Flask test client using an isolated temporary SQLite database."""
+    db_file = tmp_path / "test_health.db"
+    app = create_app(
+        {
+            "TESTING": True,
+            "SQLALCHEMY_DATABASE_URI": f"sqlite:///{db_file}",
+        }
+    )
     with app.test_client() as test_client:
         yield test_client
 
@@ -32,4 +38,5 @@ def test_homepage_renders_dashboard(client):
 
     assert response.status_code == 200
     assert b"NetSentinel AI" in response.data
+    assert b"alerts-table-body" in response.data
     assert b"trafficChart" in response.data
