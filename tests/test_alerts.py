@@ -196,6 +196,18 @@ def test_get_alerts_filters_and_validation(client):
     assert resolved_resp.get_json()["count"] == 1
     assert resolved_resp.get_json()["alerts"][0]["attack_type"] == "Policy Violation"
 
+    src_ip_resp = client.get("/api/alerts?source_ip=198.51.100.4")
+    assert src_ip_resp.status_code == 200
+    assert src_ip_resp.get_json()["count"] == 1
+    assert src_ip_resp.get_json()["alerts"][0]["attack_type"] == "SQL Injection"
+
+    dst_ip_resp = client.get("/api/alerts?destination_ip=10.0.0.1")
+    assert dst_ip_resp.status_code == 200
+    assert dst_ip_resp.get_json()["count"] == 2
+
+    bad_src_ip = client.get(f"/api/alerts?source_ip={'1' * 50}")
+    assert bad_src_ip.status_code == 400
+
     bad_severity = client.get("/api/alerts?severity=unknown")
     assert bad_severity.status_code == 400
 

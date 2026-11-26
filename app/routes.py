@@ -65,6 +65,20 @@ def get_alerts():
             ), 400
         query = query.filter(Alert.status == normalized_status)
 
+    source_ip = request.args.get("source_ip")
+    if source_ip is not None and source_ip.strip():
+        cleaned_source_ip = source_ip.strip()
+        if len(cleaned_source_ip) > 45:
+            return jsonify({"error": "source_ip filter must be at most 45 characters."}), 400
+        query = query.filter(Alert.source_ip.contains(cleaned_source_ip))
+
+    destination_ip = request.args.get("destination_ip")
+    if destination_ip is not None and destination_ip.strip():
+        cleaned_dest_ip = destination_ip.strip()
+        if len(cleaned_dest_ip) > 45:
+            return jsonify({"error": "destination_ip filter must be at most 45 characters."}), 400
+        query = query.filter(Alert.destination_ip.contains(cleaned_dest_ip))
+
     limit_raw = request.args.get("limit", "100")
     try:
         limit = int(limit_raw)

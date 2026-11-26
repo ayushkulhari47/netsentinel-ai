@@ -61,7 +61,7 @@ netsentinel-ai/
 
 - `GET /` — Threat detection dashboard UI
 - `GET /health` — Service health status JSON
-- `GET /api/alerts` — List stored alerts (supports `?severity=`, `?status=`, `?limit=`)
+- `GET /api/alerts` — List stored alerts (supports `?severity=`, `?status=`, `?source_ip=`, `?destination_ip=`, `?limit=`)
 - `POST /api/alerts` — Validate and persist a new security alert
 - `POST /api/alerts/<id>/explain` — Generate a structured explanation on demand (OpenAI if configured, else rule-based fallback)
 - `GET /api/summary` — Aggregated counts (`total_alerts`, `critical_alerts`, `high_alerts`, `suspicious_ip_count`)
@@ -184,6 +184,14 @@ NetSentinel AI uses an unsupervised `IsolationForest` model trained **only on be
 - **Score Integrity:** The LLM generates explanatory text only (`summary`, `why_it_matters`, `evidence`, `recommended_actions`, `confidence_note`) and never alters `anomaly_score`, `threat_score`, or `severity`.
 - **Safe Fallback:** If `OPENAI_API_KEY` is missing, an API call fails, or the returned JSON fails schema validation, `LLMExplainer` automatically returns a deterministic rule-based fallback explanation.
 
+## Live Security Dashboard Usage
+
+Open `http://127.0.0.1:5000/` after running `.\.venv\Scripts\python.exe run.py`:
+
+- **Live Monitoring & Status:** The dashboard automatically polls `/api/summary` and `/api/alerts` every 3 seconds, shows the last successful update time, and displays an `API Offline` status and error banner if requests fail. Use **Stop Monitoring / Start Monitoring** in the top bar to pause or resume polling.
+- **Alert Filtering:** Filter alerts dynamically by **Severity**, **Status**, **Source IP**, or **Destination IP** (with **Clear Filters** to reset). Both the alert table and the severity bar chart update from real database data.
+- **Alert Details & On-Demand AI Explanations:** Click any alert row (or **Inspect**) to open the details modal showing `explanation`, `anomaly_score`, `threat_score`, and source-IP threat-intelligence lookup (`GET /api/threat-intel/<ip>`). Click **Generate AI Explanation** to call `POST /api/alerts/<id>/explain` on demand—if `OPENAI_API_KEY` is not set, a structured rule-based fallback explanation is displayed cleanly.
+
 ## Running Tests
 
 ```powershell
@@ -200,3 +208,4 @@ NetSentinel AI uses an unsupervised `IsolationForest` model trained **only on be
 - [x] Phase 6: Explainable `RuleEngine` and `DetectionEngine` combining ML, rules, and optional threat-intel metadata
 - [x] Phase 7: Optional AbuseIPDB `ThreatIntelService`, TTL cache, `GET /api/threat-intel/<ip>`, and `DetectionEngine` integration
 - [x] Phase 8: Optional sanitized `LLMExplainer`, structured JSON validation, fallback explanations, and `POST /api/alerts/<id>/explain`
+- [x] Phase 9: Live security dashboard with 3-second polling, monitoring toggle, filters, alert modal, and on-demand explanation button

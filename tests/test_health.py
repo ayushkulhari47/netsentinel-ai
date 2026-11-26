@@ -40,3 +40,8 @@ def test_homepage_renders_dashboard(client):
     assert b"NetSentinel AI" in response.data
     assert b"alerts-table-body" in response.data
     assert b"trafficChart" in response.data
+    assert b"monitoring-toggle-btn" in response.data
+    assert b"filter-severity" in response.data
+    assert b"filter-source-ip" in response.data
+    assert b"alert-modal" in response.data
+    assert b"generate-explanation-btn" in response.data

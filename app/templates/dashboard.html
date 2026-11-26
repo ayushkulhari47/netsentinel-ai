@@ -18,6 +18,11 @@
             </div>
         </div>
         <div class="status-group">
+            <span id="monitoring-status" class="badge badge-ok">Monitoring: Active (3s)</span>
+            <span id="last-updated" class="meta-text">Last updated: Never</span>
+            <button id="monitoring-toggle-btn" type="button" class="btn btn-secondary">
+                Stop Monitoring
+            </button>
             <span id="capture-badge" class="badge badge-neutral">Capture: Standby</span>
             <span id="health-badge" class="badge badge-pending">Checking API...</span>
             <span class="version-tag">v{{ app_version }}</span>
@@ -25,6 +30,8 @@
     </header>
 
     <main class="container">
+        <div id="api-error-banner" class="error-banner hidden" role="alert"></div>
+
         <section class="kpi-grid" aria-label="Security alert summary">
             <article class="card kpi-card">
                 <h2>Total Alerts</h2>
@@ -48,6 +55,54 @@
             </article>
         </section>
 
+        <section class="card filters-card" aria-label="Alert filters">
+            <div class="filters-grid">
+                <div class="filter-group">
+                    <label for="filter-severity">Severity</label>
+                    <select id="filter-severity">
+                        <option value="">All Severities</option>
+                        <option value="critical">Critical</option>
+                        <option value="high">High</option>
+                        <option value="medium">Medium</option>
+                        <option value="low">Low</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="filter-status">Status</label>
+                    <select id="filter-status">
+                        <option value="">All Statuses</option>
+                        <option value="open">Open</option>
+                        <option value="investigating">Investigating</option>
+                        <option value="resolved">Resolved</option>
+                        <option value="false_positive">False Positive</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="filter-source-ip">Source IP</label>
+                    <input
+                        id="filter-source-ip"
+                        type="text"
+                        placeholder="e.g. 192.168.1.10"
+                        autocomplete="off"
+                    >
+                </div>
+                <div class="filter-group">
+                    <label for="filter-destination-ip">Destination IP</label>
+                    <input
+                        id="filter-destination-ip"
+                        type="text"
+                        placeholder="e.g. 10.0.0.5"
+                        autocomplete="off"
+                    >
+                </div>
+                <div class="filter-actions">
+                    <button id="clear-filters-btn" type="button" class="btn btn-outline">
+                        Clear Filters
+                    </button>
+                </div>
+            </div>
+        </section>
+
         <section class="content-grid">
             <article class="card chart-card">
                 <div class="card-header">
@@ -66,21 +121,20 @@
                 </div>
                 <div id="alerts-empty-state" class="empty-state">
                     <p>No security alerts recorded yet.</p>
-                    <p class="muted">Alerts submitted to <code>/api/alerts</code> will appear here automatically.</p>
+                    <p class="muted">Alerts matching the active filters will appear here automatically.</p>
                 </div>
                 <div id="alerts-table-wrapper" class="table-wrapper hidden">
                     <table class="alerts-table">
                         <thead>
                             <tr>
-                                <th>Time</th>
-                                <th>Source</th>
-                                <th>Destination</th>
-                                <th>Proto</th>
+                                <th>Timestamp</th>
+                                <th>Source IP</th>
+                                <th>Destination IP</th>
                                 <th>Attack Type</th>
                                 <th>Severity</th>
-                                <th>Threat</th>
-                                <th>Confidence</th>
+                                <th>Threat Score</th>
                                 <th>Status</th>
+                                <th>Details</th>
                             </tr>
                         </thead>
                         <tbody id="alerts-table-body"></tbody>
@@ -89,5 +143,82 @@
             </article>
         </section>
     </main>
+
+    <div id="alert-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <div>
+                    <h2 id="modal-title">Alert Details</h2>
+                    <p id="modal-subtitle" class="muted"></p>
+                </div>
+                <button id="modal-close-btn" type="button" class="btn-icon" aria-label="Close modal">
+                    &times;
+                </button>
+            </div>
+
+            <div class="modal-body">
+                <div class="modal-metrics">
+                    <div class="metric-box">
+                        <span class="metric-label">Severity</span>
+                        <span id="modal-severity"></span>
+                    </div>
+                    <div class="metric-box">
+                        <span class="metric-label">Threat Score</span>
+                        <span id="modal-threat-score" class="metric-val">0.0</span>
+                    </div>
+                    <div class="metric-box">
+                        <span class="metric-label">Anomaly Score</span>
+                        <span id="modal-anomaly-score" class="metric-val">0.0000</span>
+                    </div>
+                    <div class="metric-box">
+                        <span class="metric-label">Status</span>
+                        <span id="modal-status" class="metric-val">open</span>
+                    </div>
+                </div>
+
+                <section class="modal-section">
+                    <h3>Explanation</h3>
+                    <p id="modal-explanation" class="detail-text"></p>
+                </section>
+
+                <section class="modal-section">
+                    <div class="section-row">
+                        <h3>AI Threat Explanation</h3>
+                        <span id="modal-ai-source" class="pill hidden"></span>
+                    </div>
+                    <div id="modal-ai-container" class="ai-box">
+                        <p id="modal-ai-placeholder" class="muted">
+                            Click "Generate AI Explanation" to request an on-demand structured analysis.
+                        </p>
+                        <div id="modal-ai-structured" class="hidden">
+                            <p id="modal-ai-summary" class="detail-text"></p>
+                            <p id="modal-ai-why" class="detail-subtext"></p>
+                            <h4>Evidence</h4>
+                            <ul id="modal-evidence-list" class="detail-list"></ul>
+                            <h4>Recommended Actions</h4>
+                            <ul id="modal-actions-list" class="detail-list"></ul>
+                            <p id="modal-confidence-note" class="muted"></p>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="modal-section">
+                    <h3>Threat Intelligence (Source IP)</h3>
+                    <div id="modal-threat-intel" class="intel-box">
+                        <p class="muted">Loading threat-intelligence status...</p>
+                    </div>
+                </section>
+            </div>
+
+            <div class="modal-footer">
+                <button id="generate-explanation-btn" type="button" class="btn btn-primary">
+                    Generate AI Explanation
+                </button>
+                <button id="modal-dismiss-btn" type="button" class="btn btn-outline">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
