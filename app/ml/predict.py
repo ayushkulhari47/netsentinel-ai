@@ -1,6 +1,7 @@
 """Reusable inference utilities for NetSentinel AI anomaly detection."""
 
 import math
+import os
 from pathlib import Path
 import joblib
 import pandas as pd
@@ -14,13 +15,24 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_MODEL_PATH = PROJECT_ROOT / "models" / "isolation_forest.joblib"
 
 
-def load_model_bundle(model_path=DEFAULT_MODEL_PATH):
+def get_default_model_path():
+    """Resolve the active ML model path from ML_MODEL_PATH or fallback default."""
+    configured = os.environ.get("ML_MODEL_PATH")
+    if isinstance(configured, str) and configured.strip():
+        candidate = Path(configured.strip())
+        if not candidate.is_absolute():
+            candidate = PROJECT_ROOT / candidate
+        return candidate
+    return DEFAULT_MODEL_PATH
+
+
+def load_model_bundle(model_path=None):
     """Load the saved preprocessing + IsolationForest bundle via joblib."""
-    path = Path(model_path)
+    path = Path(model_path) if model_path is not None else get_default_model_path()
     if not path.exists():
         raise FileNotFoundError(
             f"Trained model file not found at '{path}'. "
-            "Run 'python scripts/train_model.py' first."
+            "Run 'python scripts/train_model.py' or 'python scripts/train_unsw_model.py' first."
         )
 
     loaded = joblib.load(path)
@@ -48,7 +60,7 @@ def _score_to_result(decision_score, raw_pred, score_scale):
     }
 
 
-def predict_flows(flows, model_path=DEFAULT_MODEL_PATH, model_bundle=None):
+def predict_flows(flows, model_path=None, model_bundle=None):
     """Predict anomaly scores, labels, and confidence for a batch of network flows."""
     bundle = model_bundle if model_bundle is not None else load_model_bundle(model_path)
     pipeline = bundle["pipeline"]
@@ -73,7 +85,7 @@ def predict_flows(flows, model_path=DEFAULT_MODEL_PATH, model_bundle=None):
     ]
 
 
-def predict_flow(flow_data, model_path=DEFAULT_MODEL_PATH, model_bundle=None):
+def predict_flow(flow_data, model_path=None, model_bundle=None):
     """Predict anomaly score, prediction label, and confidence for a single network flow.
 
     Returns a dictionary with keys:

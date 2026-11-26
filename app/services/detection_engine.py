@@ -3,9 +3,10 @@
 import ipaddress
 import numbers
 
+from flask import current_app, has_app_context
 from app.extensions import db
 from app.ml.feature_schema import validate_flow_record
-from app.ml.predict import DEFAULT_MODEL_PATH, predict_flow
+from app.ml.predict import get_default_model_path, predict_flow
 from app.models import Alert
 from app.services.rule_engine import RuleEngine
 
@@ -118,7 +119,7 @@ class DetectionEngine:
 
     def __init__(
         self,
-        model_path=DEFAULT_MODEL_PATH,
+        model_path=None,
         model_bundle=None,
         rule_engine=None,
         threat_intel_service=None,
@@ -131,12 +132,22 @@ class DetectionEngine:
         self.threat_intel_service = threat_intel_service
         self.suspicious_threshold = float(suspicious_threshold)
 
+    def _resolve_model_path(self):
+        """Resolve explicit model_path, Flask app ML_MODEL_PATH, or env/default path."""
+        if self.model_path is not None:
+            return self.model_path
+        if has_app_context():
+            configured = current_app.config.get("ML_MODEL_PATH")
+            if isinstance(configured, str) and configured.strip():
+                return configured.strip()
+        return get_default_model_path()
+
     def _run_ml(self, cleaned_flow):
         """Run local IsolationForest prediction, handling missing models gracefully."""
         try:
             ml_result = predict_flow(
                 cleaned_flow,
-                model_path=self.model_path,
+                model_path=self._resolve_model_path(),
                 model_bundle=self._model_bundle,
             )
             return True, ml_result

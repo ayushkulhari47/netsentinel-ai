@@ -42,7 +42,8 @@ netsentinel-ai/
 │   ├── generate_demo_data.py# Synthetic benign & anomalous flow data generator
 │   ├── run_capture.py       # Controlled packet capture CLI (--demo / --live)
 │   ├── run_monitor.py       # Full monitoring pipeline CLI (--demo / --live)
-│   └── train_model.py       # Train IsolationForest on benign flows & evaluate
+│   ├── train_model.py       # Train IsolationForest on synthetic benign flows
+│   └── train_unsw_model.py  # Train & evaluate IsolationForest on UNSW-NB15
 ├── tests/
 │   ├── test_alerts.py       # Alert model and API endpoint tests
 │   ├── test_detection_engine.py# RuleEngine and DetectionEngine tests
@@ -52,7 +53,8 @@ netsentinel-ai/
 │   ├── test_ml.py           # Feature schema, training, evaluation & prediction tests
 │   ├── test_monitoring.py   # End-to-end monitoring pipeline & CLI tests
 │   ├── test_packet_capture.py# Mocked Scapy packet capture & CLI safety tests
-│   └── test_threat_intel.py # Mocked AbuseIPDB lookup, caching & API route tests
+│   ├── test_threat_intel.py # Mocked AbuseIPDB lookup, caching & API route tests
+│   └── test_unsw_training.py# UNSW-NB15 mapping, chunked training & ML_MODEL_PATH tests
 ├── .env.example             # Sample environment configuration
 ├── .gitignore               # Git ignore rules for secrets, DBs, models, and caches
 ├── README.md                # Project documentation
@@ -210,6 +212,49 @@ Open `http://127.0.0.1:5000/` after running `.\.venv\Scripts\python.exe run.py`:
    ```
    Press `Ctrl+C` to stop capture gracefully, flush remaining flows, evaluate them, and save any suspicious alerts to SQLite.
 
+## Real Dataset Training (UNSW-NB15)
+
+`scripts/train_unsw_model.py` trains an `IsolationForest` model on real benign (`label == 0`) flows from the UNSW-NB15 dataset (`data/raw/UNSW-NB15/UNSW_NB15_training-set.csv`) using chunked CSV loading and evaluates it against the full testing set (`UNSW_NB15_testing-set.csv`). Target columns (`label`, `attack_cat`, `id`) are never used as model features, and the synthetic model (`models/isolation_forest.joblib`) is never overwritten.
+
+### UNSW-NB15 to `FLOW_FEATURES` Mapping
+
+| `FLOW_FEATURES` | UNSW-NB15 Source & Handling |
+| --- | --- |
+| `duration` | `dur` (coerced to finite float `>= 0`; `-`/missing -> `0.0`) |
+| `protocol` | `proto` (`TCP`, `UDP`, `ICMP`, `HTTP`, `HTTPS`, `DNS`, `SSH`; unknown/`-` -> `OTHER`) |
+| `source_port` | `sport` (`0`–`65535` if column present; `0` when omitted or invalid) |
+| `destination_port` | `dsport` (`0`–`65535` if present; otherwise inferred from `service` or `0`) |
+| `flow_bytes` | `sbytes + dbytes` |
+| `flow_packets` | `spkts + dpkts` |
+| `forward_packets` | `spkts` |
+| `backward_packets` | `dpkts` |
+| `average_packet_size` | Derived: `flow_bytes / flow_packets` (`0.0` when `flow_packets == 0`) |
+| `packet_rate` | `rate` field (fallback: `flow_packets / duration` when `duration > 0`) |
+| `byte_rate` | Derived from load fields `(sload + dload) / 8.0` (fallback: `flow_bytes / duration`) |
+
+### Training Command & Model Selection
+
+1. **Train and evaluate on UNSW-NB15:**
+   ```powershell
+   .\.venv\Scripts\python.exe scripts/train_unsw_model.py
+   ```
+   Saves the trained bundle to `models/isolation_forest_unsw_nb15.joblib` (excluded from Git via `.gitignore`).
+
+2. **Select the active model via `ML_MODEL_PATH` in `.env`:**
+   ```dotenv
+   ML_MODEL_PATH=models/isolation_forest_unsw_nb15.joblib
+   ```
+   If `ML_MODEL_PATH` is unset, `app/ml/predict.py` and `DetectionEngine` fall back to `models/isolation_forest.joblib`.
+
+### Observed UNSW-NB15 Evaluation & Limitations
+
+- **Latest Evaluation (`UNSW_NB15_testing-set.csv`):** 56,000 benign training rows, 82,332 test rows (37,000 Normal + 45,332 attacks across `Generic`, `Exploits`, `Fuzzers`, `DoS`, `Reconnaissance`, `Analysis`, `Backdoor`, `Shellcode`, `Worms`): Precision `0.8715`, Recall `0.2811`, F1-Score `0.4251` (`TN=35,121`, `FP=1,879`, `FN=32,588`, `TP=12,744`).
+- **Limitations:** The official `UNSW_NB15_training-set.csv` and `UNSW_NB15_testing-set.csv` files omit `sport` and `dsport` columns (so `source_port` defaults to `0` and `destination_port` is inferred from `service` where available). Additionally, an unsupervised `IsolationForest` trained solely on 11 benign flow-volume/rate features achieves high precision on statistical outliers while missing application-layer attacks whose packet/byte rates resemble normal traffic.
+
+### UNSW-NB15 Citation
+
+> Moustafa, N., & Slay, J. (2015). *UNSW-NB15: a comprehensive data set for network intrusion detection systems (UNSW-NB15 network data set).* 2015 Military Communications and Information Systems Conference (MilCIS), IEEE, pp. 1–6.
+
 ## Running Tests
 
 ```powershell
@@ -228,3 +273,4 @@ Open `http://127.0.0.1:5000/` after running `.\.venv\Scripts\python.exe run.py`:
 - [x] Phase 8: Optional sanitized `LLMExplainer`, structured JSON validation, fallback explanations, and `POST /api/alerts/<id>/explain`
 - [x] Phase 9: Live security dashboard with 3-second polling, monitoring toggle, filters, alert modal, and on-demand explanation button
 - [x] Phase 10: End-to-end `MonitoringService` pipeline and `scripts/run_monitor.py` (`--demo` / `--live`)
+- [x] Phase 11: Real UNSW-NB15 training/evaluation (`scripts/train_unsw_model.py`) and `ML_MODEL_PATH` selection

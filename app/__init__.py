@@ -4,6 +4,7 @@ import os
 from dotenv import load_dotenv
 from flask import Flask
 from app.extensions import db
+from app.ml.predict import DEFAULT_MODEL_PATH
 from app.services.llm_explainer import LLMExplainer
 from app.services.threat_intel import DEFAULT_CACHE_TTL_SECONDS, ThreatIntelService
 
@@ -30,6 +31,7 @@ def create_app(test_config=None):
         ),
         OPENAI_API_KEY=None,
         OPENAI_MODEL=None,
+        ML_MODEL_PATH=os.environ.get("ML_MODEL_PATH") or str(DEFAULT_MODEL_PATH),
     )
 
     if test_config is not None:
